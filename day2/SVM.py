@@ -1,87 +1,80 @@
 import numpy as np
 import matplotlib.pyplot as plt
-from scipy.optimize import minimize
-from sklearn.datasets import make_blobs
+from sklearn.svm import SVC
 
-# 尝试设置中文字体（兼容不同操作系统，若失败则回退到英文）
-try:
-    plt.rcParams['font.sans-serif'] = ['SimHei', 'Arial Unicode MS', 'Microsoft YaHei']
-    plt.rcParams['axes.unicode_minus'] = False
-except:
-    pass
+# ============================================================
+# 【修复1】解决中文显示问题
+# ============================================================
+plt.rcParams['font.sans-serif'] = ['SimHei', 'Microsoft YaHei', 'Arial Unicode MS']  # Windows优先用黑体/微软雅黑
+plt.rcParams['axes.unicode_minus'] = False  # 正常显示负号
 
-# ==========================================
-# 1. 生成线性可分的数据集
-# ==========================================
-# 生成两个簇，cluster_std 较小以保证它们绝对线性可分（硬间隔的前提）
-X, y = make_blobs(n_samples=100, centers=2, random_state=6, cluster_std=0.6)
+# ============================================================
+# 第一步：构造一个线性可分的二维数据集
+# ============================================================
+np.random.seed(42)
 
-# SVM 的标准数学形式要求标签为 -1 和 +1
-y = np.where(y == 0, -1, 1)
+X_pos = np.random.randn(30, 2) * 0.5 + [3, 3]
+X_neg = np.random.randn(30, 2) * 0.5 + [-3, -3]
 
-# ==========================================
-# 2. 构建硬间隔 SVM 的优化问题
-# ==========================================
-# 我们的变量是 vars = [w1, w2, b]
+X = np.vstack([X_pos, X_neg])
+y = np.hstack([np.ones(30), -np.ones(30)])
 
-# 目标函数: 最小化 1/2 * ||w||^2
-def objective_function(vars):
-    w = vars[:2]
-    return 0.5 * np.dot(w, w)
+# ============================================================
+# 第二步：训练硬间隔 SVM
+# ============================================================
+svm = SVC(kernel='linear', C=np.inf)
+svm.fit(X, y)
 
-# 约束条件: 对于每一个样本 i，必须满足 y_i * (w^T * x_i + b) >= 1
-# 转换为 scipy 需要的不等式形式: y_i * (w^T * x_i + b) - 1 >= 0
-constraints = []
-for i in range(len(X)):
-    cons = {
-        'type': 'ineq',  # 不等式约束 (>= 0)
-        # 注意: lambda 中使用 i=i 是为了绑定当前循环的 i 值（Python 闭包陷阱）
-        'fun': lambda vars, i=i: y[i] * (np.dot(vars[:2], X[i]) + vars[2]) - 1
-    }
-    constraints.append(cons)
+w = svm.coef_[0]
+b = svm.intercept_[0]
+support_vectors = svm.support_vectors_
 
-# 初始猜测值 [w1, w2, b]
-initial_guess = np.zeros(3)
+print(f"w = {w}")
+print(f"b = {b:.4f}")
+print(f"支持向量个数: {len(support_vectors)}")
 
-# ==========================================
-# 3. 求解优化问题
-# ==========================================
-print("开始求解硬间隔 SVM 优化问题...")
-# 使用 SLSQP 方法求解带约束的非线性优化问题
-result = minimize(objective_function, initial_guess, method='SLSQP', constraints=constraints)
+# ============================================================
+# 第三步：可视化
+# ============================================================
+plt.figure(figsize=(9, 7))
 
-w_opt = result.x[:2]
-b_opt = result.x[2]
+# 绘制样本点
+plt.scatter(X_pos[:, 0], X_pos[:, 1], c='blue', marker='o',
+            label='正类 (+1)', edgecolors='k', s=60)
+plt.scatter(X_neg[:, 0], X_neg[:, 1], c='red', marker='s',
+            label='负类 (-1)', edgecolors='k', s=60)
 
-print(f"优化状态: {result.message}")
-print(f"求得的法向量 w: [{w_opt[0]:.4f}, {w_opt[1]:.4f}]")
-print(f"求得的偏置 b: {b_opt:.4f}")
+# 绘制支持向量
+plt.scatter(support_vectors[:, 0], support_vectors[:, 1],
+            facecolors='none', edgecolors='green', linewidths=2,
+            s=150, label=f'支持向量 ({len(support_vectors)})')
 
-# ==========================================
-# 4. 找出支持向量 (Support Vectors)
-# ==========================================
-# 支持向量是那些恰好落在间隔边界上的点，即满足 y_i * (w^T * x_i + b) == 1 的点
-# 由于计算机数值计算有精度误差，我们设置一个很小的容差 tol
-tol = 1e-4
-support_vector_indices = []
-for i in range(len(X)):
-    if abs(y[i] * (np.dot(w_opt, X[i]) + b_opt) - 1) < tol:
-        support_vector_indices.append(i)
+# 创建网格并计算决策函数值
+xx, yy = np.meshgrid(np.linspace(-6, 6, 300),
+                      np.linspace(-6, 6, 300))
+grid_points = np.c_[xx.ravel(), yy.ravel()]
+Z = svm.decision_function(grid_points).reshape(xx.shape)
 
-support_vector_indices = np.array(support_vector_indices)
-print(f"找到支持向量的数量: {len(support_vector_indices)}")
+# 绘制决策边界和间隔线
+plt.contour(xx, yy, Z, levels=[0], colors='black', linewidths=2)
+plt.contour(xx, yy, Z, levels=[1], colors='blue', linestyles='--', linewidths=1.5)
+plt.contour(xx, yy, Z, levels=[-1], colors='red', linestyles='--', linewidths=1.5)
+plt.contourf(xx, yy, Z, levels=[-1, 1], colors='yellow', alpha=0.15)
 
-# ==========================================
-# 5. 可视化结果
-# ==========================================
-plt.figure(figsize=(10, 8))
+plt.title('硬间隔 SVM (C=∞)', fontsize=16)
+plt.xlabel('x₁', fontsize=13)
+plt.ylabel('x₂', fontsize=13)
+plt.legend(loc='upper left', fontsize=11)
+plt.grid(True, alpha=0.3)
+plt.axis('equal')
+plt.tight_layout()
 
-# 绘制所有数据点
-plt.scatter(X[y == 1, 0], X[y == 1, 1], color='red', label='Class +1', alpha=0.6, s=50)
-plt.scatter(X[y == -1, 0], X[y == -1, 1], color='blue', label='Class -1', alpha=0.6, s=50)
+# ============================================================
+# 【修复2】绕过 PyCharm 后端 Bug
+# ============================================================
+# 方法A（推荐）：保存图片到文件，不依赖 PyCharm 交互式窗口
+plt.savefig('hard_margin_svm.png', dpi=150, bbox_inches='tight')
+print("图片已保存为 hard_margin_svm.png")
 
-# 用黑圈高亮标出支持向量
-if len(support_vector_indices) > 0:
-    plt.scatter(X[support_vector_indices, 0], X[support_vector_indices, 1],
-                s=200, facecolors='none', edgecolors='black', linewidths=2, label='Support Vectors')
-
+# 方法B：如果你仍想弹窗显示，取消下面注释（需先升级PyCharm）
+# plt.show()
